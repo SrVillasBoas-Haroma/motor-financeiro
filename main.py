@@ -290,3 +290,54 @@ async def importar_b3(planilha: UploadFile = File(...)):
             "ativos": {c: len(v) for c, v in nova.items()}, "titulos_tesouro": len(tesouro),
             "pendentes_confirmados": len(confirmados), "pendentes_restantes": len(continuam),
             "avisos": avisos}
+
+# ============================================================ REGRA DE APORTE
+# (bloco adicionado - cole no FINAL do main.py)
+import aporte as regra_aporte
+
+
+class PedidoAporte(BaseModel):
+    carteira: str = Field(..., description="alpha ou prime")
+    valor: float = Field(..., gt=0, description="quanto voce quer aportar (R$)")
+    max_ativos: int = Field(default=5, ge=1, le=20, description="em quantos ativos dividir")
+
+
+@app.post("/aporte/sugestao", dependencies=[Depends(autorizado)])
+def sugestao_aporte(p: PedidoAporte):
+    c = p.carteira.strip().lower()
+    if c not in CARTEIRAS:
+        raise HTTPException(400, "carteira invalida (use alpha ou prime)")
+    visao = carteiras()
+    ativos = visao["carteiras"].get(c, {}).get("ativos", [])
+    if not ativos:
+        raise HTTPException(400, "carteira sem ativos com cotacao")
+    inds = regra_aporte.indicadores([a["ticker"] for a in ativos], DATA_DIR)
+    r = regra_aporte.sugerir(c, p.valor, ativos, inds, p.max_ativos)
+    r["gerado_em"] = agora()
+    r["objetivo"] = CARTEIRAS[c]["objetivo"]
+    return r
+
+
+@app.get("/indicadores/{carteira}", dependencies=[Depends(autorizado)])
+def ver_indicadores(carteira: str):
+    c = carteira.strip().lower()
+    if c not in CARTEIRAS:
+        raise HTTPException(400, "carteira invalida (use alpha ou prime)")
+    tickers = list(ler_posicoes()["carteiras"].get(c, {}).keys())
+    inds = regra_aporte.indicadores(tickers, DATA_DIR)
+    nt = regra_aporte.notas(c, inds)
+    return {"carteira": c, "gerado_em": agora(),
+            "ativos": sorted([{**inds[t], **nt[t]} for t in tickers], key=lambda x: -x["nota"])}
+
+
+@app.delete("/aportes/pendente", dependencies=[Depends(autorizado)])
+def apagar_pendente(registrado_em: str):
+    """Apaga um pendente pelo campo registrado_em (veja em GET /aportes)."""
+    with _lock:
+        dados = ler_posicoes()
+        antes = len(dados.get("pendentes", []))
+        dados["pendentes"] = [x for x in dados.get("pendentes", []) if x.get("registrado_em") != registrado_em]
+        if len(dados["pendentes"]) == antes:
+            raise HTTPException(404, "pendente nao encontrado")
+        salvar_posicoes(dados)
+    return {"ok": True, "pendentes": len(dados["pendentes"])}
