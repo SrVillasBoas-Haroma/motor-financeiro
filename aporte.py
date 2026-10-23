@@ -5,16 +5,56 @@ Regra de aporte do Motor Financeiro.
 3) Transforma a nota em peso-alvo e sugere onde aportar.
 Nada aqui e estimado por IA: tudo vem de dados e de regras fixas (config.py).
 """
+import base64
 import json
 import math
 import os
 import time
+import urllib.request
 from datetime import datetime, timedelta
 
 from config import CRITERIOS, CONGELADOS, VALOR_MINIMO_APORTE
 
 CACHE_HORAS = 12
-CACHE_VERSAO = 2   # mude o numero para forcar o recalculo de todos os indicadores
+CACHE_VERSAO = 3   # mude o numero para forcar o recalculo de todos os indicadores
+
+
+# ---------------------------------------------------------------- proventos B3
+B3_URL = ("https://sistemaswebb3-listados.b3.com.br/listedCompaniesProxy/"
+          "CompanyCall/GetListedSupplementCompany/")
+CLASSE_ISIN = {"3": "OR", "4": "PR", "5": "PA", "6": "PB"}
+
+
+def _proventos_b3(ticker):
+    """
+    Proventos em dinheiro (dividendos, JCP, rendimentos) do site publico da B3.
+    Devolve lista de (data_com, valor_por_acao) so da classe do ticker,
+    ou None se a B3 nao tiver dados (ex.: FIIs).
+    """
+    params = json.dumps({"issuingCompany": ticker[:4], "language": "pt-br"})
+    url = B3_URL + base64.b64encode(params.encode()).decode()
+    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        dados = json.loads(r.read().decode("utf-8"))
+    if not dados or not isinstance(dados, list):
+        return None
+    eventos = dados[0].get("cashDividends") or []
+    sufixo = ticker[4:]
+    saida = []
+    for e in eventos:
+        isin = e.get("isinCode") or e.get("assetIssued") or ""
+        if sufixo == "11":
+            if "CDAM" not in isin:          # unit (ex.: TAEE11)
+                continue
+        elif isin[9:11] != CLASSE_ISIN.get(sufixo, "??"):
+            continue
+        try:
+            data_com = datetime.strptime(e["lastDatePrior"], "%d/%m/%Y")
+            valor = float(str(e["rate"]).replace(".", "").replace(",", "."))
+        except Exception:
+            continue
+        saida.append((data_com, valor))
+    return saida or None
 
 
 # ---------------------------------------------------------------- indicadores
@@ -38,22 +78,46 @@ def _calcular_indicadores(ticker):
     else:
         preco = None
 
+    # proventos: B3 para acoes/units (oficial); Yahoo para FIIs
+    agora = datetime.now()
+    b3 = None
+    try:
+        b3 = _proventos_b3(ticker)
+    except Exception as e:
+        ind["erro_b3"] = str(e)[:120]
+    datas_yahoo = []
+    div = None
     try:
         div = tk.dividends
         if div is not None and len(div):
-            idx = div.index.tz_localize(None) if div.index.tz is not None else div.index
-            div.index = idx
-            ultimo_ano = div[div.index >= datetime.now() - timedelta(days=365)]
-            if preco:
-                ind["dy_12m"] = round(float(ultimo_ano.sum()) / preco * 100, 2)        # %
-            dois_anos = div[div.index >= datetime.now() - timedelta(days=730)]
-            meses = {(d.year, d.month) for d in dois_anos.index}
-            ind["consistencia_div"] = round(len(meses) / 24 * 100, 1)                  # % dos meses com provento
-        else:
-            ind["dy_12m"] = 0.0
-            ind["consistencia_div"] = 0.0
+            div.index = div.index.tz_localize(None) if div.index.tz is not None else div.index
+            datas_yahoo = list(div.index.to_pydatetime())
     except Exception:
-        pass
+        div = None
+
+    if b3:
+        ind["fonte_proventos"] = "B3"
+        ultimo_ano = sum(v for d, v in b3 if agora - timedelta(days=365) <= d <= agora)
+        if preco:
+            ind["dy_12m"] = round(ultimo_ano / preco * 100, 2)
+        # regularidade: anos (dos ultimos 5 completos) com algum provento
+        anos = {d.year for d, _ in b3} | {d.year for d in datas_yahoo}
+        ultimos5 = range(agora.year - 5, agora.year)
+        ind["consistencia_div"] = round(100 * sum(1 for a in ultimos5 if a in anos) / 5, 1)
+        ind["criterio_constancia"] = "anos com provento (ultimos 5)"
+    elif div is not None and len(div):
+        ind["fonte_proventos"] = "Yahoo"
+        ultimo_ano = div[div.index >= agora - timedelta(days=365)]
+        if preco:
+            ind["dy_12m"] = round(float(ultimo_ano.sum()) / preco * 100, 2)
+        dois_anos = div[div.index >= agora - timedelta(days=730)]
+        meses = {(d.year, d.month) for d in dois_anos.index}
+        ind["consistencia_div"] = round(len(meses) / 24 * 100, 1)
+        ind["criterio_constancia"] = "meses com provento (ultimos 24)"
+    else:
+        ind["fonte_proventos"] = "nenhuma"
+        ind["dy_12m"] = 0.0
+        ind["consistencia_div"] = 0.0
 
     try:
         info = tk.info or {}
@@ -175,7 +239,7 @@ def sugerir(carteira, valor_aporte, ativos, inds, max_ativos=5):
                        "nota": nt[a["ticker"]]["nota"],
                        "notas_por_criterio": nt[a["ticker"]]["por_criterio"],
                        "indicadores": {k: v for k, v in inds.get(a["ticker"], {}).items()
-                                       if k in CRITERIOS[carteira] or k in ("setor", "dy_12m")},
+                                       if k in CRITERIOS[carteira] or k in ("setor", "dy_12m", "fonte_proventos")},
                        "comprar_qtd": 0})
 
     # escolhe os mais abaixo do alvo
