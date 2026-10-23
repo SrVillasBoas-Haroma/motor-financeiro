@@ -7,6 +7,7 @@ import io
 import json
 import os
 import threading
+import uuid
 import time
 from datetime import datetime, date
 from zoneinfo import ZoneInfo
@@ -179,7 +180,8 @@ def registrar_aporte(a: Aporte):
     ticker = normalizar_ticker(a.ticker)
     if not ticker:
         raise HTTPException(400, "ticker vazio")
-    item = {"data": (a.data or datetime.now(FUSO).date()).isoformat(), "carteira": carteira,
+        item = {"id": uuid.uuid4().hex[:12],
+            "data": (a.data or datetime.now(FUSO).date()).isoformat(), "carteira": carteira,
             "ticker": ticker, "qtd": a.qtd, "preco": a.preco, "registrado_em": agora()}
     with _lock:
         dados = ler_posicoes()
@@ -331,13 +333,18 @@ def ver_indicadores(carteira: str):
 
 
 @app.delete("/aportes/pendente", dependencies=[Depends(autorizado)])
-def apagar_pendente(registrado_em: str):
-    """Apaga um pendente pelo campo registrado_em (veja em GET /aportes)."""
+def apagar_pendente(id: str = "", registrado_em: str = ""):
+    """Apaga UM pendente pelo id (ou, se nao tiver id, pelo registrado_em). Veja em GET /aportes."""
     with _lock:
         dados = ler_posicoes()
-        antes = len(dados.get("pendentes", []))
-        dados["pendentes"] = [x for x in dados.get("pendentes", []) if x.get("registrado_em") != registrado_em]
-        if len(dados["pendentes"]) == antes:
+        lista = dados.get("pendentes", [])
+        alvo = None
+        for i, x in enumerate(lista):
+            if (id and x.get("id") == id) or (not id and registrado_em and x.get("registrado_em") == registrado_em):
+                alvo = i
+                break
+        if alvo is None:
             raise HTTPException(404, "pendente nao encontrado")
+        removido = lista.pop(alvo)
         salvar_posicoes(dados)
-    return {"ok": True, "pendentes": len(dados["pendentes"])}
+    return {"ok": True, "removido": removido, "pendentes": len(lista)}
