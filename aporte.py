@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from config import CRITERIOS, CONGELADOS, VALOR_MINIMO_APORTE
 
 CACHE_HORAS = 12
-CACHE_VERSAO = 3   # mude o numero para forcar o recalculo de todos os indicadores
+CACHE_VERSAO = 4   # mude o numero para forcar o recalculo de todos os indicadores
 
 
 # ---------------------------------------------------------------- proventos B3
@@ -72,6 +72,7 @@ def _calcular_indicadores(ticker):
         close = close[(close / mediana - 1).abs() < 0.30]
         preco = float(close.iloc[-1])
         ret = close.pct_change().dropna()
+        ret = ret[ret.abs() < 0.25]      # descarta saltos irreais de um dia (erro de dado)
         ind["volatilidade"] = round(float(ret.std() * math.sqrt(252)) * 100, 2)      # % ao ano
         ind["retorno_12m"] = round((preco / float(close.iloc[0]) - 1) * 100, 2)        # %
         ind["dist_max_52s"] = round((preco / float(close.max()) - 1) * 100, 2)         # % abaixo da maxima
@@ -161,6 +162,9 @@ def indicadores(tickers, data_dir):
 
 
 # ---------------------------------------------------------------- notas
+# Criterios que ja sao uma porcentagem de 0 a 100 (nao comparam por ranking)
+ESCALA_ABSOLUTA = {"consistencia_div"}
+
 def _percentil(valor, todos, maior_melhor):
     """Posicao do ativo entre os da carteira: 1 = melhor, 0 = pior."""
     if len(todos) <= 1:
@@ -193,7 +197,10 @@ def notas(carteira, inds):
             if t not in valores[crit]:
                 detalhe[crit] = None
                 continue
-            p = _percentil(valores[crit][t], list(valores[crit].values()), maior_melhor)
+            if crit in ESCALA_ABSOLUTA:   # ja vem de 0 a 100: usa o proprio valor
+                p = max(0.0, min(1.0, valores[crit][t] / 100))
+            else:
+                p = _percentil(valores[crit][t], list(valores[crit].values()), maior_melhor)
             soma += p * peso
             pesos += peso
             detalhe[crit] = round(p * 100)
