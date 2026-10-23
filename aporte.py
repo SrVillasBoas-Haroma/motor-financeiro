@@ -13,8 +13,7 @@ import time
 import urllib.request
 from datetime import datetime, timedelta
 
-from config import CRITERIOS, CONGELADOS, VALOR_MINIMO_APORTE
-
+from config import CRITERIOS, CONGELADOS, VALOR_MINIMO_APORTE, SEGMENTOS, TETO_SEGMENTO
 CACHE_HORAS = 12
 CACHE_VERSAO = 4   # mude o numero para forcar o recalculo de todos os indicadores
 
@@ -249,26 +248,57 @@ def sugerir(carteira, valor_aporte, ativos, inds, max_ativos=5):
                                        if k in CRITERIOS[carteira] or k in ("setor", "dy_12m", "fonte_proventos")},
                        "comprar_qtd": 0})
 
-    # escolhe os mais abaixo do alvo
-    candidatos = sorted([l for l in linhas if l["falta_para_alvo"] > 0],
+    # ---- diversificacao por segmento
+    tetos = TETO_SEGMENTO.get(carteira, {})
+    base_total = sum(a["valor"] for a in ativos) + valor_aporte      # carteira inteira apos o aporte
+    seg_atual = {}
+    for a in ativos:
+        sg = SEGMENTOS.get(a["ticker"], "outros")
+        seg_atual[sg] = seg_atual.get(sg, 0) + a["valor"]
+    espaco = {sg: tetos.get(sg, tetos.get("padrao", 100)) / 100 * base_total - v
+              for sg, v in seg_atual.items()}
+    for l in linhas:
+        l["segmento"] = SEGMENTOS.get(l["ticker"], "outros")
+        l["bloqueado_segmento"] = espaco.get(l["segmento"], 0) <= 0
+
+    # escolhe os mais abaixo do alvo, fora de segmentos que ja estouraram o teto
+    livres = [l for l in linhas if not l["bloqueado_segmento"]]
+    candidatos = sorted([l for l in livres if l["falta_para_alvo"] > 0],
                         key=lambda l: -l["falta_para_alvo"])[:max_ativos]
     if not candidatos:
-        candidatos = sorted(linhas, key=lambda l: -l["peso_alvo_pct"])[:max_ativos]
+        candidatos = sorted(livres, key=lambda l: -l["peso_alvo_pct"])[:max_ativos]
     soma_falta = sum(max(l["falta_para_alvo"], 0) for l in candidatos) or 1
+    usado_seg = {}
     for l in candidatos:
         parte = valor_aporte * max(l["falta_para_alvo"], 0) / soma_falta
+        sg = l["segmento"]
+        parte = min(parte, max(espaco.get(sg, 0) - usado_seg.get(sg, 0), 0))
         l["comprar_qtd"] = int(parte // l["preco"])
+        usado_seg[sg] = usado_seg.get(sg, 0) + l["comprar_qtd"] * l["preco"]
 
-    # sobra: compra 1 unidade de quem ainda esta mais longe do alvo e cabe no saldo
+    # sobra: compra 1 unidade de quem ainda esta mais longe do alvo, cabe no saldo e no teto
     gasto = sum(l["comprar_qtd"] * l["preco"] for l in candidatos)
     sobra = valor_aporte - gasto
     while True:
-        cabe = [l for l in candidatos if l["preco"] <= sobra]
+        cabe = [l for l in candidatos if l["preco"] <= sobra
+                and usado_seg.get(l["segmento"], 0) + l["preco"] <= espaco.get(l["segmento"], 0)]
         if not cabe:
             break
         l = max(cabe, key=lambda x: x["falta_para_alvo"] - x["comprar_qtd"] * x["preco"])
         l["comprar_qtd"] += 1
         sobra -= l["preco"]
+        usado_seg[l["segmento"]] = usado_seg.get(l["segmento"], 0) + l["preco"]
+
+    segmentos = []
+    for sg in sorted(set(seg_atual) | set(usado_seg)):
+        teto = tetos.get(sg, tetos.get("padrao", 100))
+        antes = seg_atual.get(sg, 0)
+        depois = antes + usado_seg.get(sg, 0)
+        segmentos.append({"segmento": sg, "teto_pct": teto,
+                          "atual_pct": round(100 * antes / (base_total - valor_aporte), 2),
+                          "depois_pct": round(100 * depois / base_total, 2),
+                          "acima_do_teto": espaco.get(sg, 0) <= 0})
+    segmentos.sort(key=lambda x: -x["depois_pct"])
 
     compras = []
     for l in candidatos:
@@ -276,7 +306,8 @@ def sugerir(carteira, valor_aporte, ativos, inds, max_ativos=5):
             continue
         valor = round(l["comprar_qtd"] * l["preco"], 2)
         novo = l["valor_atual"] + valor
-        compras.append({"ticker": l["ticker"], "comprar_qtd": l["comprar_qtd"], "preco": l["preco"],
+        compras.append({"ticker": l["ticker"], "segmento": l["segmento"],
+                        "comprar_qtd": l["comprar_qtd"], "preco": l["preco"],
                         "cotacao_em": l["cotacao_em"], "valor": valor,
                         "peso_atual_pct": l["peso_atual_pct"],
                         "peso_depois_pct": round(100 * novo / valor_novo, 2),
@@ -287,8 +318,9 @@ def sugerir(carteira, valor_aporte, ativos, inds, max_ativos=5):
     return {"carteira": carteira, "valor_aporte": valor_aporte,
             "valor_usado": round(valor_aporte - sobra, 2), "sobra": round(sobra, 2),
             "compras": compras,
+            "segmentos": segmentos,
             "ranking": sorted(linhas, key=lambda l: -l["nota"]),
             "congelados": [{"ticker": c["ticker"], "valor": c["valor"], "motivo": c["motivo"]} for c in congelados],
-            "regra": "peso-alvo proporcional a (0.5 + nota/100); aporte nos mais abaixo do alvo; "
-                     "quantidades inteiras com o preco atual",
+            "regra": "peso-alvo proporcional a (0.5 + nota/100); aporte nos mais abaixo do alvo, "
+                     "respeitando o teto de cada segmento; quantidades inteiras com o preco atual",
             "aviso": "Apoio a decisao para uso pessoal. Nao e recomendacao de investimento."}
