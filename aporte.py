@@ -14,6 +14,7 @@ from datetime import datetime, timedelta
 from config import CRITERIOS, CONGELADOS, VALOR_MINIMO_APORTE
 
 CACHE_HORAS = 12
+CACHE_VERSAO = 2   # mude o numero para forcar o recalculo de todos os indicadores
 
 
 # ---------------------------------------------------------------- indicadores
@@ -26,6 +27,9 @@ def _calcular_indicadores(ticker):
     hist = tk.history(period="1y", interval="1d", auto_adjust=False)
     if hist is not None and len(hist) > 20:
         close = hist["Close"].dropna()
+        # remove erros de dado do Yahoo (precos que fogem mais de 30% da mediana dos vizinhos)
+        mediana = close.rolling(5, center=True, min_periods=1).median()
+        close = close[(close / mediana - 1).abs() < 0.30]
         preco = float(close.iloc[-1])
         ret = close.pct_change().dropna()
         ind["volatilidade"] = round(float(ret.std() * math.sqrt(252)) * 100, 2)      # % ao ano
@@ -76,11 +80,12 @@ def indicadores(tickers, data_dir):
     mudou = False
     for t in tickers:
         c = cache.get(t)
-        if c and time.time() - c.get("_ts", 0) < CACHE_HORAS * 3600:
+        if c and c.get("_v") == CACHE_VERSAO and time.time() - c.get("_ts", 0) < CACHE_HORAS * 3600:
             continue
         try:
             ind = _calcular_indicadores(t)
             ind["_ts"] = time.time()
+            ind["_v"] = CACHE_VERSAO
             cache[t] = ind
             mudou = True
         except Exception as e:
@@ -88,7 +93,7 @@ def indicadores(tickers, data_dir):
     if mudou:
         os.makedirs(data_dir, exist_ok=True)
         json.dump(cache, open(arq, "w", encoding="utf-8"), ensure_ascii=False, indent=2)
-    return {t: {k: v for k, v in cache.get(t, {}).items() if k != "_ts"} for t in tickers}
+    return {t: {k: v for k, v in cache.get(t, {}).items() if not k.startswith("_")} for t in tickers}
 
 
 # ---------------------------------------------------------------- notas
