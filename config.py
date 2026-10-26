@@ -72,3 +72,35 @@ TETO_SEGMENTO = {
     "prime": {"padrao": 30, "financeiro": 30, "fii_papel": 35, "fii_tijolo": 35},
     "alpha": {"padrao": 25},
 }
+
+# ---------------------------------------------------------------- radar de oportunidades
+# Universo de ativos que o radar avalia (fora da sua carteira). Edite a vontade.
+RADAR_UNIVERSO = {
+    "alpha": [   # acoes para crescimento
+        "ITUB4", "BPAC11", "ABCB4", "B3SA3", "PSSA3", "WEGE3", "VALE3", "SUZB3", "PRIO3",
+        "SBSP3", "CSMG3", "EQTL3", "CPFE3", "ALUP11", "VIVT3", "TIMS3", "ABEV3", "RADL3",
+        "LREN3", "MDIA3", "SLCE3", "RAIL3", "EMBR3", "TOTS3", "KLBN11", "CMIN3",
+    ],
+    "prime": [   # pagadoras e FIIs para renda
+        "KNRI11", "VISC11", "XPLG11", "HGRU11", "PVBI11", "TRXF11", "HGCR11", "KNCR11",
+        "KNIP11", "CPTS11", "RBRR11", "MCCI11", "JSRE11", "ITUB4", "BBDC3", "ABCB4",
+        "TAEE11", "ALUP11", "CPFE3", "VIVT3", "PSSA3", "SAPR11", "CSMG3", "ISAE4",
+    ],
+}
+
+SEGMENTOS.update({
+    "ITUB4": "financeiro", "BPAC11": "financeiro", "ABCB4": "financeiro", "B3SA3": "financeiro",
+    "PSSA3": "financeiro", "BBDC3": "financeiro",
+    "WEGE3": "industria", "EMBR3": "industria", "RAIL3": "logistica", "TOTS3": "tecnologia",
+    "VALE3": "materiais_basicos", "SUZB3": "materiais_basicos", "KLBN11": "materiais_basicos",
+    "CMIN3": "materiais_basicos", "PRIO3": "petroleo",
+    "SBSP3": "saneamento", "CSMG3": "saneamento", "SAPR11": "saneamento",
+    "EQTL3": "energia_eletrica", "CPFE3": "energia_eletrica", "ALUP11": "energia_eletrica",
+    "ISAE4": "energia_eletrica",
+    "VIVT3": "telecom", "TIMS3": "telecom", "ABEV3": "bebidas", "RADL3": "saude",
+    "LREN3": "varejo", "MDIA3": "alimentos", "SLCE3": "agro",
+    "KNRI11": "fii_tijolo", "VISC11": "fii_tijolo", "XPLG11": "fii_tijolo", "HGRU11": "fii_tijolo",
+    "PVBI11": "fii_tijolo", "TRXF11": "fii_tijolo", "JSRE11": "fii_tijolo",
+    "HGCR11": "fii_papel", "KNCR11": "fii_papel", "KNIP11": "fii_papel", "CPTS11": "fii_papel",
+    "RBRR11": "fii_papel", "MCCI11": "fii_papel",
+})
