@@ -357,3 +357,6 @@ def apagar_pendente(id: str = "", registrado_em: str = ""):
         removido = lista.pop(alvo)
         salvar_posicoes(dados)
     return {"ok": True, "removido": removido, "pendentes": len(lista)}
+    # ============================================================ RADAR DE OPORTUNIDADES
+from radar import router as radar_router
+app.include_router(radar_router)
