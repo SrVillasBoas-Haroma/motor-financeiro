@@ -35,9 +35,8 @@ CARTEIRA_EMPRESTIMOS = os.getenv("CARTEIRA_EMPRESTIMOS", "alpha")
 
 
 # ---------------------------------------------------------------- seguranca
-def autorizado(x_api_token: str = Header(default="")):
-    if not TOKEN or x_api_token != TOKEN:
-        raise HTTPException(status_code=401, detail="nao autorizado")
+from app_api import autorizado, adicionar_segmentos, instalar as instalar_app
+instalar_app(app)
 
 
 # ---------------------------------------------------------------- arquivos
@@ -160,6 +159,7 @@ def carteiras():
     for c in saida["carteiras"].values():
         c["pct_do_total"] = round(100 * c["valor"] / total, 2) if total else 0
     saida["total"] = round(total, 2)
+    adicionar_segmentos(saida)
     return saida
 
 
