@@ -183,8 +183,17 @@ def registrar_aporte(a: Aporte):
         item = {"id": uuid.uuid4().hex[:12],
             "data": (a.data or datetime.now(FUSO).date()).isoformat(), "carteira": carteira,
             "ticker": ticker, "qtd": a.qtd, "preco": a.preco, "registrado_em": agora()}
-    with _lock:
+        with _lock:
         dados = ler_posicoes()
+        # trava contra envio repetido sem querer: mesmo registro em menos de 5 minutos
+        for x in dados.get("pendentes", []):
+            try:
+                seg = (datetime.now(FUSO) - datetime.fromisoformat(x["registrado_em"])).total_seconds()
+            except Exception:
+                continue
+            if (x["carteira"], x["ticker"], x["qtd"]) == (carteira, ticker, a.qtd) and seg < 300:
+                raise HTTPException(409, f"parece envio repetido: {carteira} {ticker} {a.qtd} ja registrado ha "
+                                         f"{int(seg)}s. Se foi outra compra, envie de novo daqui a alguns minutos.")
         dados.setdefault("pendentes", []).append(item)
         salvar_posicoes(dados)
     return {"ok": True, "registrado": item, "pendentes": len(dados["pendentes"])}
