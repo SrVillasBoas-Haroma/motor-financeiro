@@ -359,3 +359,8 @@ def apagar_pendente(id: str = "", registrado_em: str = ""):
     # ============================================================ RADAR DE OPORTUNIDADES
 from radar import router as radar_router
 app.include_router(radar_router)
+
+   # ============================================================ RELATORIO COM IA (app)
+ from relatorio import router as relatorio_router
+ app.include_router(relatorio_router)
+
