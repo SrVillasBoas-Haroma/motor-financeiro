@@ -361,6 +361,6 @@ from radar import router as radar_router
 app.include_router(radar_router)
 
    # ============================================================ RELATORIO COM IA (app)
- from relatorio import router as relatorio_router
- app.include_router(relatorio_router)
+from relatorio import router as relatorio_router
+app.include_router(relatorio_router)
 
